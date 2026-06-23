@@ -1,0 +1,21 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+venv/
+.venv/
+env/
+
+# Generated sample documents
+data/sample_vendor/
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp
