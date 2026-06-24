@@ -2,14 +2,12 @@
 Agent 3 — Compliance Reporting Agent
 Auto-generates a compliance summary document for the vendor.
 """
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
 from .state import VendorState
-import json
+from .utils.llm import get_llm, invoke_json
 from datetime import date
 
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.3)
+llm = get_llm(temperature=0.3)
 
 
 def compliance_agent(state: VendorState) -> VendorState:
@@ -38,8 +36,21 @@ Factor the document verification findings into your compliance assessment
 (missing or invalid required documents weigh against full compliance).
 Respond ONLY with valid JSON.
 """
-    response = llm.invoke([HumanMessage(content=prompt)])
-    result = json.loads(response.content.strip().strip("```json").strip("```"))
+    try:
+        result = invoke_json(llm, prompt)
+    except Exception as exc:  # noqa: BLE001 - a bad LLM/JSON response must not crash the run
+        state.error = f"Compliance agent failed: {exc}"
+        result = {
+            "compliance_status": "partially_compliant",
+            "regulations_checked": [],
+            "action_items": [
+                "Manual compliance review required — automated check failed."
+            ],
+            "report_summary": (
+                "Automated compliance assessment could not be completed "
+                f"({exc})."
+            ),
+        }
     result["generated_date"] = str(date.today())
     state.compliance_result = result
     return state

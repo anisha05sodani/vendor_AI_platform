@@ -2,13 +2,11 @@
 Agent 2 — Fraud Detection Agent
 Flags suspicious patterns in vendor submission data.
 """
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
 from .state import VendorState
-import json
+from .utils.llm import get_llm, invoke_json
 
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm = get_llm(temperature=0)
 
 
 def fraud_detection_agent(state: VendorState) -> VendorState:
@@ -30,7 +28,14 @@ Vendor Profile:
 Red-flag rules: revenue > $10M from high-risk countries, missing >2 documents, PO Box addresses.
 Respond ONLY with valid JSON.
 """
-    response = llm.invoke([HumanMessage(content=prompt)])
-    result = json.loads(response.content.strip().strip("```json").strip("```"))
+    try:
+        result = invoke_json(llm, prompt)
+    except Exception as exc:  # noqa: BLE001 - a bad LLM/JSON response must not crash the run
+        state.error = f"Fraud agent failed: {exc}"
+        result = {
+            "fraud_score": 50,
+            "flags": [f"Automated fraud analysis could not be completed ({exc})."],
+            "recommendation": "review",
+        }
     state.fraud_result = result
     return state

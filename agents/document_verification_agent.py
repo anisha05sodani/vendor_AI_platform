@@ -5,15 +5,16 @@ documents, matches them against a required-document checklist, asks the LLM to
 assess each present document, and produces per-document comments plus an
 overall verdict that later agents (compliance, KPI) can reference.
 """
-from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from .state import VendorState
 from .config.required_documents import get_required_documents
 from .utils.document_loader import load_documents
+from .utils.llm import get_llm, invoke_json
 import json
 
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm = get_llm(temperature=0)                       # JSON-mode client (assess/classify)
+text_llm = get_llm(temperature=0, json_mode=False)  # plain-text client (summary)
 
 
 def _assess_document(state: VendorState, label: str, doc: dict) -> dict:
@@ -42,8 +43,7 @@ Extracted document text (may be truncated):
 Respond ONLY with valid JSON.
 """
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
-        result = json.loads(response.content.strip().strip("```json").strip("```"))
+        result = invoke_json(llm, prompt)
         return {
             "validity": result.get("validity", "needs_review"),
             "comments": result.get("comments", "No assessment returned."),
@@ -99,8 +99,7 @@ Extracted document text (may be truncated):
 Respond ONLY with valid JSON.
 """
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
-        result = json.loads(response.content.strip().strip("```json").strip("```"))
+        result = invoke_json(llm, prompt)
         dtype = result.get("document_type", "other")
         return {
             "type": dtype if dtype in valid_keys else "other",
@@ -129,7 +128,7 @@ Per-document findings: {json.dumps(documents_checked)}
 Respond with plain text only (no JSON, no markdown).
 """
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = text_llm.invoke([HumanMessage(content=prompt)])
         return response.content.strip()
     except Exception:  # noqa: BLE001
         if overall_status == "complete":

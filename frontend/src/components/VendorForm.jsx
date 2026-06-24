@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { getRequiredDocuments } from "../api.js";
+
 const BUSINESS_TYPES = [
   "IT Services",
   "Manufacturing",
@@ -8,12 +11,13 @@ const BUSINESS_TYPES = [
 
 const COUNTRIES = ["India", "USA", "UK", "Germany", "Nigeria", "Russia", "China"];
 
-const DOCUMENT_OPTIONS = [
-  "Business Registration",
-  "Tax Certificate",
-  "Bank Statement",
-  "ID Proof",
-  "Audited Financials",
+// Fallback used only if the backend checklist endpoint is unreachable. The
+// authoritative list comes from agents/config/required_documents.py via the API.
+const FALLBACK_DOCUMENT_OPTIONS = [
+  "Business Registration Certificate",
+  "Tax Identification Document",
+  "Proof of Address / Bank Statement",
+  "ID Proof (Authorized Signatory)",
 ];
 
 const labelCls = "block text-sm font-medium text-slate-700 mb-1";
@@ -21,6 +25,24 @@ const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
 
 export default function VendorForm({ form, setForm, files, setFiles, onSubmit, loading }) {
+  const [docOptions, setDocOptions] = useState(FALLBACK_DOCUMENT_OPTIONS);
+
+  // Load the canonical checklist (tailored by business type / country) from the
+  // backend whenever those change, so all layers share one source of truth.
+  useEffect(() => {
+    let active = true;
+    getRequiredDocuments(form.business_type, form.country)
+      .then((labels) => {
+        if (active && labels.length) setDocOptions(labels);
+      })
+      .catch(() => {
+        if (active) setDocOptions(FALLBACK_DOCUMENT_OPTIONS);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.business_type, form.country]);
+
   const update = (key) => (e) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
@@ -124,7 +146,7 @@ export default function VendorForm({ form, setForm, files, setFiles, onSubmit, l
       <div>
         <label className={labelCls}>Documents Submitted (checklist)</label>
         <div className="space-y-1.5 rounded-lg border border-slate-200 p-3">
-          {DOCUMENT_OPTIONS.map((doc) => (
+          {docOptions.map((doc) => (
             <label
               key={doc}
               className="flex cursor-pointer items-center gap-2 text-sm text-slate-700"

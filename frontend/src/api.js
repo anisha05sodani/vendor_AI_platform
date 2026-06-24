@@ -36,3 +36,16 @@ export async function onboardVendor(form, files) {
 
   return resp.json();
 }
+
+// Fetch the canonical required-document checklist from the backend (single
+// source of truth in agents/config/required_documents.py). Returns label
+// strings. Optionally tailored by business type / country.
+export async function getRequiredDocuments(businessType, country) {
+  const params = new URLSearchParams();
+  if (businessType) params.set("business_type", businessType);
+  if (country) params.set("country", country);
+  const resp = await fetch(`${API_BASE}/api/v1/required-documents?${params}`);
+  if (!resp.ok) throw new Error(`Failed to load required documents (${resp.status})`);
+  const body = await resp.json();
+  return (body.required_documents ?? []).map((d) => d.label);
+}

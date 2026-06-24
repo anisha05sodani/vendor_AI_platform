@@ -1,9 +1,9 @@
 """
 Multi-Agent Orchestrator — LangGraph Pipeline
-Chains all 4 agents in sequence with conditional routing.
+Chains all 5 agents in sequence with conditional routing.
 """
 from langgraph.graph import StateGraph, END
-from typing import TypedDict, Optional, Any
+from typing import TypedDict, Optional
 from agents.state import VendorState
 from agents.document_verification_agent import document_verification_agent
 from agents.qualification_agent import vendor_qualification_agent
@@ -69,13 +69,51 @@ def run_kpi(state: GraphState) -> GraphState:
     return _to_graph(updated)
 
 
+def run_reject(state: GraphState) -> GraphState:
+    """Terminal node for the auto-reject path (critical fraud score).
+
+    Writing the decision in a node — rather than the conditional-edge router —
+    guarantees the mutation is persisted to graph state by LangGraph.
+    """
+    vendor = _to_pydantic(state)
+    fraud = vendor.fraud_result or {}
+    qual = vendor.qualification_result or {}
+    docs = vendor.document_verification_result or {}
+    vendor.final_decision = "REJECTED"
+    vendor.pipeline_status = "completed"
+    vendor.kpi_summary = {
+        "overall_score": 0,
+        "decision": "REJECTED",
+        "key_metrics": {
+            "risk_level": qual.get("risk_level"),
+            "fraud_score": fraud.get("fraud_score"),
+            "compliance_status": None,
+            "missing_docs_count": len(docs.get("missing_required_documents", []) or []),
+            "document_status": docs.get("overall_document_status"),
+        },
+        "executive_summary": (
+            f"Vendor automatically REJECTED: fraud score "
+            f"{fraud.get('fraud_score')}/100 met or exceeded the critical "
+            "threshold (85). Compliance and KPI stages were skipped."
+        ),
+        "next_steps": [
+            "Notify the vendor of rejection.",
+            "Escalate to fraud investigation if warranted.",
+        ],
+    }
+    return _to_graph(vendor)
+
+
 def should_continue_after_fraud(state: GraphState) -> str:
-    """Skip compliance & KPI if fraud score is critically high."""
+    """Pure router: skip compliance & KPI if fraud score is critically high.
+
+    Must NOT mutate state — mutations inside a conditional-edge function are not
+    reliably persisted by LangGraph. The reject decision is written by the
+    dedicated ``run_reject`` node instead.
+    """
     fraud = state.get("fraud_result") or {}
     if fraud.get("fraud_score", 0) >= 85:
-        state["final_decision"] = "REJECTED"
-        state["pipeline_status"] = "completed"
-        return "end"
+        return "reject"
     return "compliance"
 
 
@@ -87,6 +125,7 @@ def build_pipeline() -> StateGraph:
     graph.add_node("fraud", run_fraud)
     graph.add_node("compliance", run_compliance)
     graph.add_node("kpi", run_kpi)
+    graph.add_node("reject", run_reject)
 
     graph.set_entry_point("document_verification")
     graph.add_edge("document_verification", "qualification")
@@ -94,10 +133,11 @@ def build_pipeline() -> StateGraph:
     graph.add_conditional_edges(
         "fraud",
         should_continue_after_fraud,
-        {"compliance": "compliance", "end": END},
+        {"compliance": "compliance", "reject": "reject"},
     )
     graph.add_edge("compliance", "kpi")
     graph.add_edge("kpi", END)
+    graph.add_edge("reject", END)
 
     return graph.compile()
 

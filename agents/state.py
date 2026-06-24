@@ -12,8 +12,8 @@ class VendorState(BaseModel):
     business_type: str
     annual_revenue: float
     country: str
-    documents_submitted: list[str]
-    documents: list[str] = []  # file paths to uploaded document files
+    documents_submitted: list[str]  # DEPRECATED: legacy text checklist; superseded by `documents`
+    documents: list[str] = []  # file paths to uploaded document files (authoritative)
 
     # --- Agent Outputs ---
     document_verification_result: Optional[dict] = None

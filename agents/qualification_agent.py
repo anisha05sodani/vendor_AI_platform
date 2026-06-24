@@ -2,16 +2,21 @@
 Agent 1 — Vendor Qualification Agent
 Screens vendor eligibility based on submitted profile data.
 """
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
 from .state import VendorState
-import json, os
+from .config.required_documents import get_required_documents
+from .utils.llm import get_llm, invoke_json
 
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm = get_llm(temperature=0)
 
 
 def vendor_qualification_agent(state: VendorState) -> VendorState:
+    # Single source of truth: the required-document checklist comes from
+    # agents/config/required_documents.py (shared with the verification agent
+    # and the frontend), not a hardcoded list.
+    required_labels = [
+        r["label"] for r in get_required_documents(state.business_type, state.country)
+    ]
     prompt = f"""
 You are a vendor qualification specialist. Evaluate the following vendor and return a JSON with:
 - eligible (bool)
@@ -26,10 +31,21 @@ Vendor Profile:
 - Country: {state.country}
 - Documents Submitted: {', '.join(state.documents_submitted)}
 
-Required documents: ["Business Registration", "Tax Certificate", "Bank Statement", "ID Proof"]
+Required documents: {required_labels}
 Respond ONLY with valid JSON.
 """
-    response = llm.invoke([HumanMessage(content=prompt)])
-    result = json.loads(response.content.strip().strip("```json").strip("```"))
+    try:
+        result = invoke_json(llm, prompt)
+    except Exception as exc:  # noqa: BLE001 - a bad LLM/JSON response must not crash the run
+        state.error = f"Qualification agent failed: {exc}"
+        result = {
+            "eligible": None,
+            "risk_level": "high",
+            "reason": (
+                "Automated qualification could not be completed "
+                f"({exc}). Manual review required."
+            ),
+            "missing_documents": [],
+        }
     state.qualification_result = result
     return state

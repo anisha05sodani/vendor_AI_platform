@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 from orchestrator import run_pipeline
+from agents.config.required_documents import get_required_documents
 
 app = FastAPI(
     title="Vendor AI Orchestration Platform",
@@ -90,9 +91,15 @@ def onboard_vendor(
     Runs the full agent pipeline on multipart form data:
     Document Verification → Qualification → Fraud Detection → Compliance → KPI Summary
 
-    `documents_submitted` is a JSON-encoded list of document names (legacy text
-    checklist). `files` are the actual uploaded document files that the
-    Document Verification agent reads and verifies.
+    `documents_submitted` is a JSON-encoded list of document names. NOTE: this
+    legacy text checklist is **deprecated** — the Document Verification agent now
+    reads the actual uploaded `files`, which is the authoritative signal. It is
+    retained only for backward compatibility and may be removed in future.
+
+    SCALING NOTE: this is a synchronous (blocking) endpoint and the pipeline
+    (LLM calls + OCR/PDF parsing) can take ~20-30s, holding a worker thread for
+    the whole request. Fine for a demo; for production move to an async
+    endpoint + background task/queue (e.g. Celery/RQ) and stream results.
     """
     # Parse the legacy text checklist.
     try:
@@ -142,6 +149,25 @@ def get_sample_payload():
         "annual_revenue": 2500000,
         "country": "India",
         "documents_submitted": ["Business Registration", "Tax Certificate", "ID Proof"],
+    }
+
+
+@app.get("/api/v1/required-documents")
+def required_documents(
+    business_type: Optional[str] = None,
+    country: Optional[str] = None,
+):
+    """Single source of truth for the document checklist.
+
+    Returns the required-document keys/labels from
+    ``agents/config/required_documents.py`` so the frontend and the agents all
+    agree on one canonical list (optionally tailored by business type/country).
+    """
+    docs = get_required_documents(business_type, country)
+    return {
+        "required_documents": [
+            {"key": d["key"], "label": d["label"]} for d in docs
+        ]
     }
 
 
